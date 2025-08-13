@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  cdk-erigon-da-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cdk-erigon-da-server
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    volumes:
+      - .env:/app/.env
