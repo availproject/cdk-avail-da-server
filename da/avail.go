@@ -18,12 +18,18 @@ import (
 )
 
 type AvailBackend struct {
-	eth_client   *ethclient.Client
-	avail_sdk    avail_sdk.SDK
-	attestorAddr common.Address
+	isBridgeEnabled bool
+	eth_client      *ethclient.Client
+	avail_sdk       avail_sdk.SDK
+	attestorAddr    common.Address
 }
 
-func NewAvailBackend(attestorAddr string, l1RPCURL string, availRPCURL string) (*AvailBackend, error) {
+func NewAvailBackend(isBridgeEnabled bool, attestorAddr string, l1RPCURL string, availRPCURL string) (*AvailBackend, error) {
+
+	if !isBridgeEnabled {
+		log.Println("Avail Bridge is not enabled, returning empty backend")
+		return &AvailBackend{isBridgeEnabled: false}, nil
+	}
 
 	addr := common.HexToAddress(attestorAddr)
 
@@ -40,30 +46,40 @@ func NewAvailBackend(attestorAddr string, l1RPCURL string, availRPCURL string) (
 	}
 
 	return &AvailBackend{
-		eth_client:   client,
-		avail_sdk:    sdk,
-		attestorAddr: addr,
+		isBridgeEnabled: true,
+		eth_client:      client,
+		avail_sdk:       sdk,
+		attestorAddr:    addr,
 	}, nil
+}
+
+func (a *AvailBackend) IsBridgeEnabled() bool {
+	return a.isBridgeEnabled
 }
 
 func (a *AvailBackend) GetDataFromAvail(hash common.Hash) ([]byte, error) {
 	start := time.Now()
-	log.Printf("Fetching data from Avail, hash:%v", hash.Hex())
+	log.Printf("Fetching data from Avail")
 
 	blockNumber, leafIndex, err := a.getAttestation(hash)
-	if blockNumber == 0 || leafIndex == 0 || err != nil {
-		log.Printf("No attestation found, error:%v, duration:%v", err, time.Since(start))
+	if blockNumber == 0 || leafIndex == 0 {
+		log.Printf("No attestation found")
 		return nil, errors.New("no attestation found")
 	}
+	if err != nil {
+		log.Printf("Failed to get attestation, error:%v", err)
+		return nil, err
+	}
 
-	log.Printf("Attestation found, blockNumber:%d, leafIndex:%d",
+	log.Printf("Attestation found, blockNumber:%d, leafIndex:%d (duration:%v)",
 		blockNumber,
 		leafIndex,
+		time.Since(start),
 	)
 
 	data, err := a.getData(blockNumber, leafIndex)
 	if err != nil {
-		log.Printf("Failed to get data from Avail, error:%v, duration:%v", err, time.Since(start))
+		log.Printf("Failed to get data from Avail, error:%v", err)
 		return nil, err
 	}
 
@@ -97,7 +113,7 @@ func (a *AvailBackend) getData(blockNumber uint32, index int64) ([]byte, error) 
 		log.Printf("AvailDAWarn:‼️ Unable to extract the signer address for the blob")
 	}
 
-	log.Printf("AvailDAInfo: ✅ Tx batch retrieved from Avail chain, signer: %s, appID: %s, extrinsicHash: %s",
+	log.Printf("AvailDAInfo: ✅ Tx batch retrieved from Avail chain, signer: %s, appID: %d, extrinsicHash: %s",
 		signerAddress.ToHuman(),
 		blob.AppId,
 		blob.TxHash,
@@ -138,10 +154,5 @@ func (a *AvailBackend) getAttestation(hash common.Hash) (uint32, int64, error) {
 		return 0, 0, err
 	}
 
-	log.Printf("Successfully retrieved attestation, blockNumber%v,leafIndex:%d, duration:%v",
-		output.BlockNumber,
-		output.LeafIndex.Int64(),
-		time.Since(start),
-	)
 	return output.BlockNumber, output.LeafIndex.Int64(), nil
 }

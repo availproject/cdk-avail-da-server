@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -66,28 +67,44 @@ func main() {
 func intializeServer() (*da.AvailBackend, *da.S3Backend, error) {
 	log.Println("Initializing server...")
 
-	attestorAddr := os.Getenv("ATTESTATION_CONTRACT_ADDRESS")
-	if attestorAddr == "" {
-		log.Printf("ATTESTATION_CONTRACT_ADDRESS is not set")
-		return nil, nil, errors.New("ATTESTATION_CONTRACT_ADDRESS is not set")
-	}
-
-	l1_rpc_url := os.Getenv("L1_RPC_URL")
-	if attestorAddr == "" {
-		log.Printf("L1_RPC_URL is not set")
-		return nil, nil, errors.New("L1_RPC_URL is not set")
-	}
-
-	avail_rpc_url := os.Getenv("AVAIL_RPC_URL")
-	if avail_rpc_url == "" {
-		log.Printf("AVAIL_RPC_URL is not set")
-		return nil, nil, errors.New("AVAIL_RPC_URL is not set")
-	}
-
-	a, err := da.NewAvailBackend(attestorAddr, l1_rpc_url, avail_rpc_url)
+	isBridgeEnabled, err := strconv.ParseBool(os.Getenv("IS_BRIDGE_ENABLED"))
 	if err != nil {
-		log.Printf("Failed to initialize Avail backend: %v", err)
+		log.Printf("Invalid boolean value for IS_BRIDGE_ENABLED: %v", err)
 		return nil, nil, err
+	}
+
+	var a *da.AvailBackend
+	if isBridgeEnabled {
+		attestorAddr := os.Getenv("ATTESTATION_CONTRACT_ADDRESS")
+		if attestorAddr == "" {
+			log.Printf("ATTESTATION_CONTRACT_ADDRESS is not set")
+			return nil, nil, errors.New("ATTESTATION_CONTRACT_ADDRESS is not set")
+		}
+
+		l1_rpc_url := os.Getenv("L1_RPC_URL")
+		if attestorAddr == "" {
+			log.Printf("L1_RPC_URL is not set")
+			return nil, nil, errors.New("L1_RPC_URL is not set")
+		}
+
+		avail_rpc_url := os.Getenv("AVAIL_RPC_URL")
+		if avail_rpc_url == "" {
+			log.Printf("AVAIL_RPC_URL is not set")
+			return nil, nil, errors.New("AVAIL_RPC_URL is not set")
+		}
+
+		a, err = da.NewAvailBackend(true, attestorAddr, l1_rpc_url, avail_rpc_url)
+		if err != nil {
+			log.Printf("Failed to initialize Avail backend: %v", err)
+			return nil, nil, err
+		}
+	} else {
+		a, err = da.NewAvailBackend(false, "", "", "")
+		if err != nil {
+			log.Printf("Failed to initialize Avail backend: %v", err)
+			return nil, nil, err
+		}
+		log.Println("Avail Bridge is not enabled, using default AvailBackend")
 	}
 
 	bucket := os.Getenv("S3_BUCKET")

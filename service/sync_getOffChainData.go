@@ -3,25 +3,17 @@ package service
 import (
 	"errors"
 	"log"
-	"os"
-	"strconv"
 
 	"github.com/availproject/cdk-erigon-da-service/da"
 	"github.com/ethereum/go-ethereum/common"
 )
 
 func GetOffChainData(a *da.AvailBackend, s *da.S3Backend, hash string) ([]byte, error) {
-	log.Printf("Processing hash: %s", hash)
+	log.Printf("Getting off-chain data for hash: %s", hash)
 
 	hexHash := common.HexToHash(hash)
 
-	isBridgeEnabled, err := strconv.ParseBool(os.Getenv("IS_BRIDGE_ENABLED"))
-	if err != nil {
-		log.Printf("Invalid boolean value for IS_BRIDGE_ENABLED: %v", err)
-		return nil, err
-	}
-
-	if isBridgeEnabled {
+	if a.IsBridgeEnabled() {
 		data, err := a.GetDataFromAvail(hexHash)
 		if err != nil {
 			log.Printf("Failed to get data from Avail, falling back to S3: %v", err)
@@ -29,6 +21,8 @@ func GetOffChainData(a *da.AvailBackend, s *da.S3Backend, hash string) ([]byte, 
 			log.Println("Successfully retrieved data from Avail")
 			return data, nil
 		}
+	} else {
+		log.Printf("Avail Bridge is not enabled for the cdk chain, checking on S3")
 	}
 
 	log.Println("Retrieving off-chain data from S3")
