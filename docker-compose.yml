@@ -1,11 +1,11 @@
 version: "3.9"
 
 services:
-  cdk-erigon-da-server:
+  cdk-avail-da-server:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: cdk-erigon-da-server
+    container_name: cdk-avail-da-server
     env_file:
       - .env
     ports:

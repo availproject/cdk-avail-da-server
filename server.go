@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/availproject/cdk-erigon-da-service/da"
-	"github.com/availproject/cdk-erigon-da-service/rpc"
+	"github.com/availproject/cdk-avail-da-server/da"
+	"github.com/availproject/cdk-avail-da-server/rpc"
 	"github.com/joho/godotenv"
 )
 

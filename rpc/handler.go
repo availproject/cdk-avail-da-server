@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/availproject/cdk-erigon-da-service/da"
-	"github.com/availproject/cdk-erigon-da-service/service"
+	"github.com/availproject/cdk-avail-da-server/da"
+	"github.com/availproject/cdk-avail-da-server/service"
 )
 
 type RPCRequest struct {

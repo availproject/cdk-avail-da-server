@@ -1,6 +1,6 @@
 # CDK Erigon DA Server
 
-A simple cdk-erigon-da-server for serving off-chain data.  
+A simple cdk-avail-da-server for serving off-chain data.  
 It attempts to fetch data from an Avail DA and can falls back to an AWS S3 bucket if the data was unable to found from Avail DA
 
 ---

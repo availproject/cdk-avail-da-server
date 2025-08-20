@@ -4,7 +4,7 @@ import (
 	"errors"
 	"log"
 
-	"github.com/availproject/cdk-erigon-da-service/da"
+	"github.com/availproject/cdk-avail-da-server/da"
 	"github.com/ethereum/go-ethereum/common"
 )
 

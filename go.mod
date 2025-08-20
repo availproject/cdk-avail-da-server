@@ -1,4 +1,4 @@
-module github.com/availproject/cdk-erigon-da-service
+module github.com/availproject/cdk-avail-da-server
 
 go 1.23.4
 
