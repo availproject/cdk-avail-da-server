@@ -62,7 +62,7 @@ func (a *AvailBackend) GetDataFromAvail(hash common.Hash) ([]byte, error) {
 	log.Printf("Fetching data from Avail")
 
 	blockNumber, leafIndex, err := a.getAttestation(hash)
-	if blockNumber == 0 || leafIndex == 0 {
+	if blockNumber == 0 {
 		log.Printf("No attestation found")
 		return nil, errors.New("no attestation found")
 	}
@@ -86,8 +86,6 @@ func (a *AvailBackend) GetDataFromAvail(hash common.Hash) ([]byte, error) {
 	log.Printf("Successfully retrieved data from Avail, duration:%v", time.Since(start))
 	return data, nil
 }
-
-const attestationABI = `[{"inputs":[{"internalType":"bytes32","name":"","type":"bytes32"}],"name":"attestations","outputs":[{"internalType":"uint32","name":"blockNumber","type":"uint32"},{"internalType":"uint128","name":"leafIndex","type":"uint128"}],"stateMutability":"view","type":"function"}]`
 
 func (a *AvailBackend) getData(blockNumber uint32, index int64) ([]byte, error) {
 	blockHash, err := a.avail_sdk.Client.BlockHash(blockNumber)
@@ -122,9 +120,11 @@ func (a *AvailBackend) getData(blockNumber uint32, index int64) ([]byte, error) 
 	return blob.Data, nil
 }
 
+const attestationABI = `[{"inputs":[{"internalType":"bytes32","name":"","type":"bytes32"}],"name":"attestations","outputs":[{"internalType":"uint32","name":"blockNumber","type":"uint32"},{"internalType":"uint128","name":"leafIndex","type":"uint128"}],"stateMutability":"view","type":"function"}]`
+
 func (a *AvailBackend) getAttestation(hash common.Hash) (uint32, int64, error) {
 	start := time.Now()
-	log.Printf("Getting attestation, hash:%v", hash.Hex())
+	log.Printf("Getting attestation from contract:%v, hash:%v", a.attestorAddr, hash.Hex())
 
 	parsedABI, err := abi.JSON(strings.NewReader(attestationABI))
 	if err != nil {
