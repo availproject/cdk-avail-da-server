@@ -45,32 +45,24 @@ func createAvailBackend(t *testing.T) AvailBackend {
 }
 
 func TestPostAndGetSequence(t *testing.T) {
+	ctx := context.Background()
+	if deadline, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
+	}
 	message := "This is the power of Avail Data Availability layer"
 
-	input := [][]byte{[]byte(message)}
-	packedData, err := byteArrayArguments.Pack(input)
-	if err != nil {
-		t.Fatalf("Error in packing: %v", err)
-	}
-
-	unpackedData, err := byteArrayArguments.Unpack(packedData)
-	if err != nil {
-		t.Fatalf("Error in encoding the message to byte array: %v", err)
-	}
-
-	data, ok := unpackedData[0].([][]byte)
-	if !ok {
-		t.Fatalf("unable to unpack data")
-	}
+	batchData := [][]byte{[]byte(message)}
 
 	availBackend := createAvailBackend(t)
 
-	dataAvailabilityMsgbytes, err := availBackend.PostSequence(context.Background(), data)
+	dataAvailabilityMsgbytes, err := availBackend.PostSequence(ctx, batchData)
 	if err != nil {
 		t.Fatalf("Unable to post the msg over avail chain: %v", err)
 	}
 
-	msgBytes, err := availBackend.GetSequence(context.Background(), []common.Hash{}, dataAvailabilityMsgbytes)
+	msgBytes, err := availBackend.GetSequence(ctx, []common.Hash{}, dataAvailabilityMsgbytes)
 	if err != nil {
 		t.Fatalf("Unable to retrieve the msg from avail chain: %v", err)
 	}
@@ -79,13 +71,20 @@ func TestPostAndGetSequence(t *testing.T) {
 }
 
 func TestAvailDASubmitData(t *testing.T) {
+	ctx := context.Background()
+	if deadline, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
+	}
+
 	randomBytes, err := GenerateRandomBytes(32)
 	if err != nil {
 		t.Fatalf("Error generating random bytes: %v", err)
 	}
 
 	availBackend := createAvailBackend(t)
-	txDetails, err := availBackend.submitData(randomBytes)
+	txDetails, err := availBackend.submitData(ctx, randomBytes)
 	if err != nil {
 		t.Fatalf("cannot submit data: %+v", err)
 	}
