@@ -9,16 +9,28 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-var unit8Type = abi.Type{T: abi.UintTy, Size: 8}
-var byte32Type = abi.Type{T: abi.FixedBytesTy, Size: 32}
-var uint32Type = abi.Type{Size: 32, T: abi.UintTy}
-var stringType = abi.Type{T: abi.StringTy}
-var byte32ArrayType = abi.Type{T: abi.SliceTy, Elem: &abi.Type{T: abi.FixedBytesTy, Size: 32}}
-var uint256Type = abi.Type{Size: 256, T: abi.UintTy}
-var byteArrayType = abi.Type{T: abi.SliceTy, Elem: &abi.Type{T: abi.BytesTy}} // Type for bytes[]
+// -------------------- ABI Types --------------------
+var (
+	unit8Type       = abi.Type{T: abi.UintTy, Size: 8}
+	byte32Type      = abi.Type{T: abi.FixedBytesTy, Size: 32}
+	uint32Type      = abi.Type{Size: 32, T: abi.UintTy}
+	byte32ArrayType = abi.Type{T: abi.SliceTy, Elem: &abi.Type{T: abi.FixedBytesTy, Size: 32}}
+	uint256Type     = abi.Type{Size: 256, T: abi.UintTy}
+	bytesType       = abi.Type{T: abi.BytesTy}
+)
 
-var byteArrayArguments = abi.Arguments{{Type: byteArrayType}}
+// -------------------- Envelope --------------------
+const (
+	DAM_TYPE_BLOB_POINTER = 0x01
+	DAM_TYPE_MERKLE_PROOF = 0x02
+)
 
+var envelopeArgs = abi.Arguments{
+	{Type: unit8Type}, // messageType
+	{Type: bytesType}, // payload
+}
+
+// -------------------- MerkleProofInput --------------------
 type MerkleProofInput struct {
 	DataRootProof [][32]byte `abi:"dataRootProof"`
 	LeafProof     [][32]byte `abi:"leafProof"`
@@ -60,9 +72,27 @@ type DataProof struct {
 	Leaf           string   `json:"leaf"`
 }
 
-var merkleProofInputType = abi.Type{T: abi.TupleTy, TupleType: reflect.TypeOf(MerkleProofInput{}), TupleElems: []*abi.Type{&byte32ArrayType, &byte32ArrayType, &byte32Type, &uint256Type, &byte32Type, &byte32Type, &byte32Type, &uint256Type}, TupleRawNames: []string{"dataRootProof", "leafProof", "rangeHash", "dataRootIndex", "blobRoot", "bridgeRoot", "leaf", "leafIndex"}}
+var merkleProofInputType = abi.Type{
+	T:             abi.TupleTy,
+	TupleType:     reflect.TypeOf(MerkleProofInput{}),
+	TupleElems:    []*abi.Type{&byte32ArrayType, &byte32ArrayType, &byte32Type, &uint256Type, &byte32Type, &byte32Type, &byte32Type, &uint256Type},
+	TupleRawNames: []string{"dataRootProof", "leafProof", "rangeHash", "dataRootIndex", "blobRoot", "bridgeRoot", "leaf", "leafIndex"},
+}
 var merkleProofInputArguments = abi.Arguments{
 	{Type: merkleProofInputType},
+}
+
+func NewMerkleProofInput(resp *BridgeAPIResponse) *MerkleProofInput {
+	return &MerkleProofInput{
+		DataRootProof: hashSliceToArray(resp.DataRootProof),
+		LeafProof:     hashSliceToArray(resp.LeafProof),
+		RangeHash:     hashToArray(resp.RangeHash),
+		DataRootIndex: resp.DataRootIndex,
+		BlobRoot:      hashToArray(resp.BlobRoot),
+		BridgeRoot:    hashToArray(resp.BridgeRoot),
+		Leaf:          hashToArray(resp.Leaf),
+		LeafIndex:     resp.LeafIndex,
+	}
 }
 
 func (m *MerkleProofInput) EnodeToBinary() ([]byte, error) {
@@ -84,6 +114,7 @@ func (m *MerkleProofInput) DecodeFromBinary(data []byte) error {
 	return nil
 }
 
+// -------------------- BlobPointer --------------------
 // BlobPointer version
 const (
 	BLOBPOINTER_VERSION0 = 0x00
@@ -103,6 +134,15 @@ type BlobPointer struct {
 
 var blobPointerArguments = abi.Arguments{
 	{Type: unit8Type}, {Type: uint32Type}, {Type: uint32Type}, {Type: byte32Type},
+}
+
+func NewBlobPointer(blockHeight uint32, extrinsicIndex uint32, dataCommitment common.Hash) *BlobPointer {
+	return &BlobPointer{
+		Version:            BLOBPOINTER_VERSION0,
+		BlockHeight:        blockHeight,
+		ExtrinsicIndex:     extrinsicIndex,
+		BlobDataKeccak265H: dataCommitment,
+	}
 }
 
 func (b *BlobPointer) MarshalToBinary() ([]byte, error) {
@@ -133,4 +173,32 @@ func (bp *BlobPointer) String() string {
 		bp.ExtrinsicIndex,
 		bp.BlobDataKeccak265H.Hex(),
 	)
+}
+
+// -------------------- Envelope helpers --------------------
+func PackEnvelopeWithMsgType(msgType uint8, payload []byte) ([]byte, error) {
+	return envelopeArgs.Pack(msgType, payload)
+}
+
+func UnpackEnvelopeForMsgType(data []byte) (uint8, []byte, error) {
+	unpacked, err := envelopeArgs.Unpack(data)
+	if err != nil {
+		return 0, nil, fmt.Errorf("unpack envelope failed: %w", err)
+	}
+	msgType := unpacked[0].(uint8)
+	payload := unpacked[1].([]byte)
+	return msgType, payload, nil
+}
+
+// -------------------- Helpers --------------------
+func hashSliceToArray(hashes []common.Hash) [][32]byte {
+	arr := make([][32]byte, len(hashes))
+	for i, h := range hashes {
+		arr[i] = h
+	}
+	return arr
+}
+
+func hashToArray(h common.Hash) [32]byte {
+	return h
 }

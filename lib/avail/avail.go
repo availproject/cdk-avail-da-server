@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/vedhavyas/go-subkey/v2"
 
 	"github.com/availproject/avail-go-sdk/primitives"
@@ -56,17 +57,25 @@ type AvailBackend struct {
 	fallbackS3Service *s3_storage_service.S3StorageService
 }
 
-func New(l1RPCURL string, availattestationContractAddress common.Address, config Config) (*AvailBackend, error) {
+func New(l1RPCURL string, attestationContractAddress common.Address, config Config) (*AvailBackend, error) {
 
-	log.Info("AvailDAInfo:ℹ️ AvailDA config: ws-api-url:%+v, http-api-url: %+v, app-id: %+v, bridge-enabled:%+v, bridge-api-url: %+v, bridge-timeout: %+v, ", config.WsApiUrl, config.HttpApiUrl, config.AppID, config.BridgeEnabled, config.BridgeApiUrl, config.BridgeTimeout)
+	log.Info("AvailDA config",
+		"ws-api-url", config.WsApiUrl,
+		"http-api-url", config.HttpApiUrl,
+		"app-id", config.AppID,
+		"bridge-enabled", config.BridgeEnabled,
+		"bridge-api-url", config.BridgeApiUrl,
+		"bridge-timeout", config.BridgeTimeout,
+	)
+	log.Info("AvailDAInfo: 📜 Attestation contract", "address", attestationContractAddress)
+
 	ethClient, err := ethclient.Dial(l1RPCURL)
 	if err != nil {
 		log.Error("AvailDAError: ⚠️ error connecting to %s: %+v", l1RPCURL, err)
 		return nil, err
 	}
 
-	log.Info("AvailDAInfo: 📜 Attestation contract address: %v", availattestationContractAddress)
-	attestationContract, err := availattestation.NewAvailattestation(availattestationContractAddress, ethClient)
+	attestationContract, err := availattestation.NewAvailattestation(attestationContractAddress, ethClient)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +107,7 @@ func New(l1RPCURL string, availattestationContractAddress common.Address, config
 		}
 	}
 
-	log.Info("AvailDAInfo: 🔑 Using KeyringPair with address %v", acc.SS58Address(AvailNetworkID))
+	log.Info("AvailDAInfo: 🔑 Using KeyringPair", "address", acc.SS58Address(AvailNetworkID))
 	log.Info("AvailDAInfo:✌️ Avail backend client is created successfully")
 
 	return &AvailBackend{
@@ -122,132 +131,102 @@ func (a *AvailBackend) Init() error {
 }
 
 func (a *AvailBackend) PostSequence(ctx context.Context, batchesData [][]byte) ([]byte, error) {
-	sequence, err := byteArrayArguments.Pack(batchesData)
+	// RLP Encode
+	sequenceBlobData, err := rlp.EncodeToBytes(batchesData)
 	if err != nil {
-		return nil, fmt.Errorf("cannot pack data:%w", err)
+		return nil, fmt.Errorf("cannot RLP encode data:%w", err)
+	}
+	log.Info("AvailDAInfo: ⚡️ Prepared data for Avail: %d bytes", len(sequenceBlobData))
+
+	// Submit the data to the Avail chain
+	log.Info("AvailDAInfo: 📤 Submitting data to Avail chain")
+	txDetails, err := a.submitData(ctx, sequenceBlobData)
+	if err != nil {
+		return nil, fmt.Errorf("cannot submit data: %w", err)
 	}
 
-	log.Info("AvailDAInfo: ⚡️ Prepared data for Avail: %d bytes", len(sequence))
-
-	txDetails, err := a.submitData(sequence)
-	if err != nil {
-		return nil, fmt.Errorf("cannot submit data:%+v", err)
-	}
-
-	var resp []byte
+	var dataAvailabilityMessage []byte
 	var dataCommitment common.Hash
 	if a.bridgeEnabled {
-		var input *BridgeAPIResponse
-		waitTime := time.Duration(a.bridgeTimeout) * time.Second
-		retryCount := BridgeApiRetryCount
-		for retryCount > 0 {
-			log.Info("AvailDAInfo: ℹ️ Bridge API URL: %v", fmt.Sprintf("%s/eth/proof/%s?index=%d", a.bridgeApi, txDetails.BlockHash.String(), txDetails.TxIndex))
-			resp, err := http.Get(fmt.Sprintf("%s/eth/proof/%s?index=%d", a.bridgeApi, txDetails.BlockHash.String(), txDetails.TxIndex))
-			if err == nil && resp.StatusCode == 200 {
-				log.Info("AvailDAInfo: ✅ Attestation proof received")
-				data, err := io.ReadAll(resp.Body)
-				if err != nil {
-					return nil, fmt.Errorf("cannot read body:%v", err)
-				}
-				input = &BridgeAPIResponse{}
-				err = json.Unmarshal(data, input)
-				if err != nil {
-					return nil, fmt.Errorf("cannot unmarshal data:%v", err)
-				}
-				break
-
-			}
-			log.Info("AvailDAWarn: ⏳ Attestation proof RPC errored, response code: %v, retry count left: %v, retrying in %v", resp.StatusCode, retryCount, waitTime)
-
-			defer resp.Body.Close()
-
-			retryCount--
-			time.Sleep(waitTime)
-		}
-
-		if input == nil {
-			return nil, fmt.Errorf("didn't get any proof from bridge api:%+v", err)
-		}
-
-		log.Info("AvailDAInfo: 🔗 Attestation proof received: %+v", input)
-
-		var dataRootProof [][32]byte
-		for _, hash := range input.DataRootProof {
-			dataRootProof = append(dataRootProof, hash)
-		}
-		var leafProof [][32]byte
-		for _, hash := range input.LeafProof {
-			leafProof = append(leafProof, hash)
-		}
-		merkleProofInput := &MerkleProofInput{
-			DataRootProof: dataRootProof,
-			LeafProof:     leafProof,
-			RangeHash:     input.RangeHash,
-			DataRootIndex: input.DataRootIndex,
-			BlobRoot:      input.BlobRoot,
-			BridgeRoot:    input.BridgeRoot,
-			Leaf:          input.Leaf,
-			LeafIndex:     input.LeafIndex,
-		}
-		log.Info("AvailDAInfo: 🔗 Merkle proof input: %+v", merkleProofInput)
-		resp, err = merkleProofInput.EnodeToBinary()
+		merkleProofInput, err := a.getMerkleProofFromAvailBridge(ctx, txDetails.BlockHash, txDetails.TxIndex)
 		if err != nil {
-			return nil, fmt.Errorf("cannot encode data:%v", err)
+			return nil, fmt.Errorf("cannot get merkle proof from bridge: %w", err)
 		}
 		dataCommitment = merkleProofInput.Leaf
-	} else {
-		dataCommitment = crypto.Keccak256Hash(sequence)
-		var blobPointer BlobPointer = BlobPointer{BLOBPOINTER_VERSION0, txDetails.BlockNumber, txDetails.TxIndex, dataCommitment}
-		resp, err = blobPointer.MarshalToBinary()
+		log.Info("AvailDAInfo: 🔗 Merkle proof", "input", merkleProofInput)
+		payload, err := merkleProofInput.EnodeToBinary()
 		if err != nil {
-			return nil, fmt.Errorf("cannot encide blobPointer: %v", err)
+			return nil, fmt.Errorf("encode merkle proof failed:%w", err)
 		}
-
+		dataAvailabilityMessage, err = PackEnvelopeWithMsgType(DAM_TYPE_MERKLE_PROOF, payload)
+		if err != nil {
+			return nil, fmt.Errorf("pack envelope failed: %w", err)
+		}
+	} else {
+		dataCommitment := crypto.Keccak256Hash(sequenceBlobData)
+		blobPointer := NewBlobPointer(txDetails.BlockNumber, txDetails.TxIndex, dataCommitment)
+		payload, err := blobPointer.MarshalToBinary()
+		if err != nil {
+			return nil, fmt.Errorf("encode blob pointer failed: %w", err)
+		}
+		dataAvailabilityMessage, err = PackEnvelopeWithMsgType(DAM_TYPE_BLOB_POINTER, payload)
+		if err != nil {
+			return nil, fmt.Errorf("pack envelope failed: %w", err)
+		}
 	}
 
 	// fallback
 	if a.fallbackS3Service != nil {
-		err := a.fallbackS3Service.Put(ctx, sequence, 0, dataCommitment)
-		if err != nil {
+		if err = a.fallbackS3Service.Put(ctx, sequenceBlobData, 0, dataCommitment); err != nil {
 			log.Error("AvailDAError: failed to put data on s3 storage service: %w", err)
 		} else {
 			log.Info("AvailInfo: ✅  Succesfully posted data from Avail S3 using fallbackS3Service")
 		}
 	}
 
-	return resp, nil
+	return dataAvailabilityMessage, nil
 }
 
 func (a *AvailBackend) GetSequence(ctx context.Context, batchHashes []common.Hash, dataAvailabilityMessage []byte) ([][]byte, error) {
 
-	var resp [][]byte
+	msgType, payload, err := UnpackEnvelopeForMsgType(dataAvailabilityMessage)
+	if err != nil {
+		return nil, err
+	}
+
 	var blobData []byte
 	var blockNumber uint32
 	var index uint32
 	var indexType IndexType
 	var dataCommitment common.Hash
 
-	if a.bridgeEnabled {
-		inp := &MerkleProofInput{}
-		if err := inp.DecodeFromBinary(dataAvailabilityMessage); err != nil {
-			return nil, fmt.Errorf("failed to decode input: %w", err)
+	switch msgType {
+	case DAM_TYPE_MERKLE_PROOF:
+		merkleProofInput := &MerkleProofInput{}
+		if err := merkleProofInput.DecodeFromBinary(payload); err != nil {
+			return nil, fmt.Errorf("failed to decode MerkleProofInput: %w", err)
 		}
-		log.Info("AvailDAInfo: ℹ️ Merkle proof input: %+v", inp)
-		attestationData, err := a.attestationContract.Attestations(nil, inp.Leaf)
+		attestationData, err := a.attestationContract.Attestations(nil, merkleProofInput.Leaf)
 		if err != nil {
-			return nil, fmt.Errorf("cannot get attestation data from contract:%v", err)
+			return nil, fmt.Errorf("cannot get attestation data: %w", err)
 		}
 		blockNumber = attestationData.BlockNumber
 		index = uint32(attestationData.LeafIndex.Uint64())
 		indexType = LeafIndex
-		dataCommitment = inp.Leaf
-	} else {
-		var blobPointer BlobPointer
-		blobPointer.UnmarshalFromBinary(dataAvailabilityMessage)
+		dataCommitment = merkleProofInput.Leaf
+
+	case DAM_TYPE_BLOB_POINTER:
+		blobPointer := &BlobPointer{}
+		if err := blobPointer.UnmarshalFromBinary(payload); err != nil {
+			return nil, fmt.Errorf("failed to decode BlobPointer: %w", err)
+		}
 		blockNumber = blobPointer.BlockHeight
 		index = blobPointer.ExtrinsicIndex
 		indexType = TxIndex
 		dataCommitment = blobPointer.BlobDataKeccak265H
+
+	default:
+		return nil, fmt.Errorf("unknown data availabilty message type: %d", msgType)
 	}
 
 	if a.fallbackS3Service != nil {
@@ -261,52 +240,148 @@ func (a *AvailBackend) GetSequence(ctx context.Context, batchHashes []common.Has
 	}
 
 	if len(blobData) == 0 || blobData == nil {
-		var err error
-		blobData, err = a.getData(blockNumber, index, indexType)
-		if err != nil {
-			log.Warn("AvailDAError: unable to read data from AvailDA & Fallback s3 storage")
-			return nil, fmt.Errorf("cannot get data from block:%v", err)
+		blobDataCh := make(chan struct {
+			data []byte
+			err  error
+		}, 1)
+		go func() {
+			data, err := a.getData(blockNumber, index, indexType)
+			blobDataCh <- struct {
+				data []byte
+				err  error
+			}{data, err}
+		}()
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case res := <-blobDataCh:
+			if res.err != nil {
+				log.Warn("AvailDAError: unable to read data from AvailDA & Fallback s3 storage")
+				return nil, fmt.Errorf("cannot get data from block:%w", res.err)
+			}
+			blobData = res.data
 		}
 		log.Info("AvailDAInfo: ✅ Successfully able to retreive the data from AvailDA")
 	}
 
-	unpackedData, err := byteArrayArguments.Unpack(blobData)
-	if err != nil {
-		return nil, fmt.Errorf("cannot decode data:%v", err)
-	}
-	var ok bool
-	resp, ok = unpackedData[0].([][]byte)
-	if !ok {
-		return nil, fmt.Errorf("cannot parse data")
+	var batchesData [][]byte
+	if err := rlp.DecodeBytes(blobData, &batchesData); err != nil {
+		return nil, fmt.Errorf("cannot RLP decode data:%w", err)
 	}
 
-	return resp, nil
+	return batchesData, nil
 }
 
-func (a *AvailBackend) submitData(sequence []byte) (avail_sdk.TransactionDetails, error) {
+func (a *AvailBackend) submitData(ctx context.Context, sequence []byte) (avail_sdk.TransactionDetails, error) {
+	resultCh := make(chan struct {
+		details avail_sdk.TransactionDetails
+		err     error
+	}, 1)
 
-	// Transaction will be signed, sent, and watched
-	// If the transaction was dropped or never executed, the system will retry it
-	// for 2 more times using the same nonce and app id.
-	//
-	// Waits for finalization to finalize the transaction.
-	tx := a.sdk.Tx.DataAvailability.SubmitData(sequence)
-	txDetails, err := tx.ExecuteAndWatchFinalization(a.acc, avail_sdk.NewTransactionOptions().WithAppId(uint32(a.appId)))
-	if err != nil {
-		return avail_sdk.TransactionDetails{}, fmt.Errorf("⚠️ extrinsic got rejected from avail chain, %w", err)
+	// Run the blocking SDK call in a goroutine
+	go func() {
+		// Transaction will be signed, sent, and watched
+		// If the transaction was dropped or never executed, the system will retry it
+		// for 2 more times using the same nonce and app id.
+		//
+		// Waits for finalization to finalize the transaction.
+		tx := a.sdk.Tx.DataAvailability.SubmitData(sequence)
+		txDetails, err := tx.ExecuteAndWatchFinalization(
+			a.acc,
+			avail_sdk.NewTransactionOptions().WithAppId(uint32(a.appId)),
+		)
+
+		if err == nil {
+			// Check success
+			// Returns None if there was no way to determine the
+			// success status of a transaction. Otherwise it returns
+			// true or false.
+			status := txDetails.IsSuccessful().UnsafeUnwrap()
+			if !status {
+				err = fmt.Errorf("⚠️ extrinsic failed on avail chain, status: %v", status)
+			}
+		}
+
+		resultCh <- struct {
+			details avail_sdk.TransactionDetails
+			err     error
+		}{txDetails, err}
+	}()
+
+	// Now wait for either SDK result or context cancellation
+	select {
+	case <-ctx.Done():
+		return avail_sdk.TransactionDetails{}, ctx.Err()
+	case res := <-resultCh:
+		if res.err != nil {
+			return avail_sdk.TransactionDetails{}, fmt.Errorf("⚠️ extrinsic got rejected: %w", res.err)
+		}
+
+		log.Info("AvailDAInfo: ✅ Tx batch included in Avail chain",
+			"address", a.address,
+			"appID", a.appId,
+			"block_number", res.details.BlockNumber,
+			"block_hash", res.details.BlockHash,
+			"tx_index", res.details.TxIndex,
+		)
+		return res.details, nil
+	}
+}
+
+func (a *AvailBackend) getMerkleProofFromAvailBridge(ctx context.Context, blockHash primitives.H256, txIndex uint32) (*MerkleProofInput, error) {
+	var input *BridgeAPIResponse
+	waitTime := time.Duration(a.bridgeTimeout) * time.Second
+	retryCount := BridgeApiRetryCount
+	for retryCount > 0 {
+		url := fmt.Sprintf("%s/eth/proof/%s?index=%d", a.bridgeApi, blockHash.String(), txIndex)
+		log.Info("AvailDAInfo: ℹ️ Bridge API URL: %v", url)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("new request: %w", err)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			log.Info("AvailDAInfo: ✅ Attestation proof received")
+			data, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return nil, fmt.Errorf("cannot read body:%w", err)
+			}
+			input = &BridgeAPIResponse{}
+			err = json.Unmarshal(data, input)
+			if err != nil {
+				return nil, fmt.Errorf("cannot unmarshal data:%w", err)
+			}
+			break
+		}
+
+		if resp != nil {
+			resp.Body.Close()
+		}
+		log.Info("AvailDAWarn: ⏳ Attestation proof RPC errored, response code: %v, retry count left: %v, retrying in %v", resp.StatusCode, retryCount-1, waitTime)
+
+		timer := time.NewTimer(waitTime)
+		defer timer.Stop()
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+			retryCount--
+		}
 	}
 
-	// Returns None if there was no way to determine the
-	// success status of a transaction. Otherwise it returns
-	// true or false.
-	status := txDetails.IsSuccessful().UnsafeUnwrap()
-	if !status {
-		return avail_sdk.TransactionDetails{}, fmt.Errorf("⚠️ extrinsic got failed while execution on avail chain, status: %v", status)
+	if input == nil {
+		return nil, fmt.Errorf("didn't get any proof from bridge api")
 	}
 
-	log.Info("AvailDAInfo: ✅  Tx batch is got included in Avail chain, ", "address: ", a.address, ", appID: ", a.appId, ", block_number: ", txDetails.BlockNumber, ", block_hash: ", txDetails.BlockHash, ", tx_index: ", txDetails.TxIndex)
+	log.Info("AvailDAInfo: 🔗 Attestation proof received: %+v", input)
 
-	return txDetails, nil
+	merkleProofInput := NewMerkleProofInput(input)
+
+	return merkleProofInput, nil
 }
 
 type IndexType string
