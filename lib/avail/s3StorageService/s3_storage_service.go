@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -15,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 
 	flag "github.com/spf13/pflag"
@@ -36,6 +38,7 @@ type S3StorageServiceConfig struct {
 	Region              string `mapstructure:"Region"`
 	SecretKey           string `mapstructure:"SecretKey"`
 	DiscardAfterTimeout bool   `mapstructure:"DiscardAfterTimeout"`
+	Concurrency         int    `mapstructure:"Concurrency"`
 }
 
 var DefaultS3StorageServiceConfig = S3StorageServiceConfig{
@@ -50,6 +53,7 @@ func S3ConfigAddOptions(prefix string, f *flag.FlagSet) {
 	f.String(prefix+".Region", DefaultS3StorageServiceConfig.Region, "S3 region")
 	f.String(prefix+".SecretKey", DefaultS3StorageServiceConfig.SecretKey, "S3 secret key")
 	f.Bool(prefix+".DiscardAfterTimeout", DefaultS3StorageServiceConfig.DiscardAfterTimeout, "discard data after its expiry timeout")
+	f.Int(prefix+".Concurrency", DefaultS3StorageServiceConfig.Concurrency, "number of concurrent S3 requests to make when uploading/downloading multiple items")
 }
 
 type S3StorageService struct {
@@ -59,6 +63,7 @@ type S3StorageService struct {
 	uploader            S3Uploader
 	downloader          S3Downloader
 	discardAfterTimeout bool
+	concurrency         int
 }
 
 func NewS3StorageService(config S3StorageServiceConfig) (*S3StorageService, error) {
@@ -73,6 +78,7 @@ func NewS3StorageService(config S3StorageServiceConfig) (*S3StorageService, erro
 		uploader:            manager.NewUploader(client),
 		downloader:          manager.NewDownloader(client),
 		discardAfterTimeout: config.DiscardAfterTimeout,
+		concurrency:         config.Concurrency,
 	}, nil
 }
 
@@ -101,6 +107,60 @@ func (s3s *S3StorageService) GetByHash(ctx context.Context, key common.Hash) ([]
 	return buf.Bytes(), err
 }
 
+func (s3s *S3StorageService) GetMultipleByHash(ctx context.Context, keys []common.Hash) ([][]byte, error) {
+	type result struct {
+		index int
+		data  []byte
+		err   error
+	}
+
+	concurrency := s3s.concurrency
+	if concurrency <= 0 {
+		concurrency = 5
+	}
+	sem := make(chan struct{}, concurrency)
+	resultsCh := make(chan result, len(keys))
+
+	var wg sync.WaitGroup
+
+	for i, key := range keys {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case sem <- struct{}{}:
+		}
+
+		wg.Add(1)
+		go func(idx int, k common.Hash) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			data, err := s3s.GetByHash(ctx, k)
+			resultsCh <- result{index: idx, data: data, err: err}
+		}(i, key)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultsCh)
+	}()
+
+	data := make([][]byte, len(keys))
+	var finalErr error
+	for res := range resultsCh {
+		data[res.index] = res.data
+		if res.err != nil {
+			if finalErr == nil {
+				finalErr = fmt.Errorf("one or more downloads failed: %w", res.err)
+			} else {
+				finalErr = fmt.Errorf("%v; %w", finalErr, res.err)
+			}
+		}
+	}
+
+	return data, finalErr
+}
+
 func (s3s *S3StorageService) Put(ctx context.Context, value []byte, timeout uint64, commitment common.Hash) error {
 	logPut("avail.S3StorageService.Store", value, timeout, s3s)
 	putObjectInput := s3.PutObjectInput{
@@ -117,6 +177,49 @@ func (s3s *S3StorageService) Put(ctx context.Context, value []byte, timeout uint
 		log.Error("avail.S3StorageService.Store", "err", err)
 	}
 	return err
+}
+
+func (s3s *S3StorageService) PutMultiple(ctx context.Context, values [][]byte) error {
+
+	resultCh := make(chan error, len(values))
+	var wg sync.WaitGroup
+	concurrency := s3s.concurrency
+	if concurrency <= 0 {
+		concurrency = 5
+	}
+	sem := make(chan struct{}, concurrency)
+
+	for i := 0; i < len(values); i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case sem <- struct{}{}:
+		}
+
+		wg.Add(1)
+		commitment := crypto.Keccak256Hash(values[i])
+		go func(idx int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			err := s3s.Put(ctx, values[idx], 0, commitment)
+			resultCh <- err
+		}(i)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	var finalErr error
+	for err := range resultCh {
+		if err != nil {
+			finalErr = fmt.Errorf("one or more uploads failed: %w", err)
+		}
+	}
+
+	return finalErr
 }
 
 func (s3s *S3StorageService) Sync(ctx context.Context) error {

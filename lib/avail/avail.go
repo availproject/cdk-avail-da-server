@@ -146,13 +146,11 @@ func (a *AvailBackend) PostSequence(ctx context.Context, batchesData [][]byte) (
 	}
 
 	var dataAvailabilityMessage []byte
-	var dataCommitment common.Hash
 	if a.bridgeEnabled {
 		merkleProofInput, err := a.getMerkleProofFromAvailBridge(ctx, txDetails.BlockHash, txDetails.TxIndex)
 		if err != nil {
 			return nil, fmt.Errorf("cannot get merkle proof from bridge: %w", err)
 		}
-		dataCommitment = merkleProofInput.Leaf
 		log.Info("AvailDAInfo: 🔗 Merkle proof", "input", merkleProofInput)
 		payload, err := merkleProofInput.EnodeToBinary()
 		if err != nil {
@@ -177,7 +175,7 @@ func (a *AvailBackend) PostSequence(ctx context.Context, batchesData [][]byte) (
 
 	// fallback
 	if a.fallbackS3Service != nil {
-		if err = a.fallbackS3Service.Put(ctx, sequenceBlobData, 0, dataCommitment); err != nil {
+		if err = a.fallbackS3Service.PutMultiple(ctx, batchesData); err != nil {
 			log.Error("AvailDAError: failed to put data on s3 storage service: %w", err)
 		} else {
 			log.Info("AvailInfo: ✅  Succesfully posted data from Avail S3 using fallbackS3Service")
@@ -194,11 +192,9 @@ func (a *AvailBackend) GetSequence(ctx context.Context, batchHashes []common.Has
 		return nil, err
 	}
 
-	var blobData []byte
 	var blockNumber uint32
 	var index uint32
 	var indexType IndexType
-	var dataCommitment common.Hash
 
 	switch msgType {
 	case DAM_TYPE_MERKLE_PROOF:
@@ -213,7 +209,6 @@ func (a *AvailBackend) GetSequence(ctx context.Context, batchHashes []common.Has
 		blockNumber = attestationData.BlockNumber
 		index = uint32(attestationData.LeafIndex.Uint64())
 		indexType = LeafIndex
-		dataCommitment = merkleProofInput.Leaf
 
 	case DAM_TYPE_BLOB_POINTER:
 		blobPointer := &BlobPointer{}
@@ -223,7 +218,6 @@ func (a *AvailBackend) GetSequence(ctx context.Context, batchHashes []common.Has
 		blockNumber = blobPointer.BlockHeight
 		index = blobPointer.ExtrinsicIndex
 		indexType = TxIndex
-		dataCommitment = blobPointer.BlobDataKeccak265H
 
 	default:
 		return nil, fmt.Errorf("unknown data availabilty message type: %d", msgType)
@@ -231,39 +225,39 @@ func (a *AvailBackend) GetSequence(ctx context.Context, batchHashes []common.Has
 
 	if a.fallbackS3Service != nil {
 		var err error
-		blobData, err = a.fallbackS3Service.GetByHash(ctx, dataCommitment)
+		batchesData, err := a.fallbackS3Service.GetMultipleByHash(ctx, batchHashes)
 		if err != nil {
 			log.Info("AvailInfo: ❌  failed to read data from fallback s3 storage, err: %w", err)
 		} else {
 			log.Info("AvailInfo: ✅  Succesfully fetched data from Avail S3 using fallbackS3Service")
+			return batchesData, nil
 		}
 	}
 
-	if len(blobData) == 0 || blobData == nil {
-		blobDataCh := make(chan struct {
+	var blobData []byte
+	blobDataCh := make(chan struct {
+		data []byte
+		err  error
+	}, 1)
+	go func() {
+		data, err := a.getData(blockNumber, index, indexType)
+		blobDataCh <- struct {
 			data []byte
 			err  error
-		}, 1)
-		go func() {
-			data, err := a.getData(blockNumber, index, indexType)
-			blobDataCh <- struct {
-				data []byte
-				err  error
-			}{data, err}
-		}()
+		}{data, err}
+	}()
 
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case res := <-blobDataCh:
-			if res.err != nil {
-				log.Warn("AvailDAError: unable to read data from AvailDA & Fallback s3 storage")
-				return nil, fmt.Errorf("cannot get data from block:%w", res.err)
-			}
-			blobData = res.data
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-blobDataCh:
+		if res.err != nil {
+			log.Warn("AvailDAError: unable to read data from AvailDA & Fallback s3 storage")
+			return nil, fmt.Errorf("cannot get data from block:%w", res.err)
 		}
-		log.Info("AvailDAInfo: ✅ Successfully able to retreive the data from AvailDA")
+		blobData = res.data
 	}
+	log.Info("AvailDAInfo: ✅ Successfully able to retreive the data from AvailDA")
 
 	var batchesData [][]byte
 	if err := rlp.DecodeBytes(blobData, &batchesData); err != nil {
