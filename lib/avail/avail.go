@@ -151,7 +151,6 @@ func (a *AvailBackend) PostSequence(ctx context.Context, batchesData [][]byte) (
 		if err != nil {
 			return nil, fmt.Errorf("cannot get merkle proof from bridge: %w", err)
 		}
-		log.Info("AvailDAInfo: 🔗 Merkle proof", "input", merkleProofInput)
 		payload, err := merkleProofInput.EnodeToBinary()
 		if err != nil {
 			return nil, fmt.Errorf("encode merkle proof failed:%w", err)
@@ -178,10 +177,11 @@ func (a *AvailBackend) PostSequence(ctx context.Context, batchesData [][]byte) (
 		if err = a.fallbackS3Service.PutMultiple(ctx, batchesData); err != nil {
 			log.Error("AvailDAError: failed to put data on s3 storage service: %w", err)
 		} else {
-			log.Info("AvailInfo: ✅  Succesfully posted data from Avail S3 using fallbackS3Service")
+			log.Info("AvailDAInfo: ✅  Succesfully posted data from Avail S3 using fallbackS3Service")
 		}
 	}
 
+	log.Info("AvailDAInfo: ✅ Data availability message: %+v", dataAvailabilityMessage)
 	return dataAvailabilityMessage, nil
 }
 
@@ -329,7 +329,7 @@ func (a *AvailBackend) getMerkleProofFromAvailBridge(ctx context.Context, blockH
 	retryCount := BridgeApiRetryCount
 	for retryCount > 0 {
 		url := fmt.Sprintf("%s/eth/proof/%s?index=%d", a.bridgeApi, blockHash.String(), txIndex)
-		log.Info("AvailDAInfo: ℹ️ Bridge API URL: %v", url)
+		log.Info("AvailDAInfo: ℹ️ Querying Bridge for merkle proof", "URL", url)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return nil, fmt.Errorf("new request: %w", err)
@@ -354,7 +354,7 @@ func (a *AvailBackend) getMerkleProofFromAvailBridge(ctx context.Context, blockH
 		if resp != nil {
 			resp.Body.Close()
 		}
-		log.Info("AvailDAWarn: ⏳ Attestation proof RPC errored, response code: %v, retry count left: %v, retrying in %v", resp.StatusCode, retryCount-1, waitTime)
+		log.Info("AvailDAWarn: ⏳ Attestation proof RPC errored, response code: %v, retry count left: %v, retrying in %v", resp.StatusCode, (retryCount - 1), waitTime)
 
 		timer := time.NewTimer(waitTime)
 		defer timer.Stop()
@@ -371,7 +371,7 @@ func (a *AvailBackend) getMerkleProofFromAvailBridge(ctx context.Context, blockH
 		return nil, fmt.Errorf("didn't get any proof from bridge api")
 	}
 
-	log.Info("AvailDAInfo: 🔗 Attestation proof received: %+v", input)
+	log.Info("AvailDAInfo: 🔗 Attestation proof: %+v", input)
 
 	merkleProofInput := NewMerkleProofInput(input)
 
