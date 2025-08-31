@@ -105,12 +105,12 @@ func (m *MerkleProofInput) DecodeFromBinary(data []byte) error {
 		return fmt.Errorf("unable to convert the data bytes to merkleProofInput. error:%w", err)
 	}
 
-	decoded, ok := unpackedData[0].(*MerkleProofInput)
+	decoded, ok := unpackedData[0].(MerkleProofInput)
 	if !ok {
 		return fmt.Errorf("unexpected type in unpacked data")
 	}
 
-	*m = *decoded
+	*m = decoded
 	return nil
 }
 

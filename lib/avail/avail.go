@@ -145,7 +145,7 @@ func (a *AvailBackend) PostSequence(ctx context.Context, batchesData [][]byte) (
 	if err != nil {
 		return nil, fmt.Errorf("cannot RLP encode data:%w", err)
 	}
-	a.logger.Info("AvailDAInfo: ⚡️ Posting Sequence", "length", len(sequenceBlobData))
+	a.logger.Info("AvailDAInfo: ⚡️ Posting Sequence ", "length=", len(sequenceBlobData))
 
 	// Submit the data to the Avail chain
 	a.logger.Info("AvailDAInfo: 📤 Submitting data to Avail chain")
@@ -199,7 +199,7 @@ func (a *AvailBackend) PostSequence(ctx context.Context, batchesData [][]byte) (
 	}
 
 	a.logger.Debug("AvailDADebug: ✅ Data availability message: %+v", dataAvailabilityMessage)
-	a.logger.Info("AvailDAInfo: ⚡️ Sequence posted successfully", "length", len(sequenceBlobData))
+	a.logger.Info("AvailDAInfo: ⚡️ Sequence posted successfully ", "length=", len(sequenceBlobData))
 	return dataAvailabilityMessage, nil
 }
 
