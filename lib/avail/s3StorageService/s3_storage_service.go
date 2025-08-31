@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/0xPolygon/cdk/log"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsConfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -17,7 +18,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
 
 	flag "github.com/spf13/pflag"
 )
@@ -57,6 +57,7 @@ func S3ConfigAddOptions(prefix string, f *flag.FlagSet) {
 }
 
 type S3StorageService struct {
+	logger              *log.Logger
 	client              *s3.Client
 	bucket              string
 	objectPrefix        string
@@ -66,12 +67,13 @@ type S3StorageService struct {
 	concurrency         int
 }
 
-func NewS3StorageService(config S3StorageServiceConfig) (*S3StorageService, error) {
+func NewS3StorageService(config S3StorageServiceConfig, logger *log.Logger) (*S3StorageService, error) {
 	client, err := buildS3Client(config.AccessKey, config.SecretKey, config.Region)
 	if err != nil {
 		return nil, err
 	}
 	return &S3StorageService{
+		logger:              logger,
 		client:              client,
 		bucket:              config.Bucket,
 		objectPrefix:        config.ObjectPrefix,
@@ -97,7 +99,7 @@ func buildS3Client(accessKey, secretKey, region string) (*s3.Client, error) {
 }
 
 func (s3s *S3StorageService) GetByHash(ctx context.Context, key common.Hash) ([]byte, error) {
-	log.Trace("avail.S3StorageService.GetByHash", "key", prettyHash(key), "this", s3s)
+	s3s.logger.Debug("avail.S3StorageService.GetByHash", "key", prettyHash(key), "this", s3s)
 
 	buf := manager.NewWriteAtBuffer([]byte{})
 	_, err := s3s.downloader.Download(ctx, buf, &s3.GetObjectInput{
@@ -174,7 +176,7 @@ func (s3s *S3StorageService) Put(ctx context.Context, value []byte, timeout uint
 	}
 	_, err := s3s.uploader.Upload(ctx, &putObjectInput)
 	if err != nil {
-		log.Error("avail.S3StorageService.Store", "err", err)
+		s3s.logger.Error("avail.S3StorageService.Store", "err", err)
 	}
 	return err
 }
@@ -246,13 +248,13 @@ func EncodeStorageServiceKey(key common.Hash) string {
 func logPut(store string, data []byte, timeout uint64, reader *S3StorageService, more ...interface{}) {
 	if len(more) == 0 {
 		// #nosec G115
-		log.Trace(
+		reader.logger.Debug(
 			store, "message", firstFewBytes(data), "timeout", time.Unix(int64(timeout), 0),
 			"this", reader,
 		)
 	} else {
 		// #nosec G115
-		log.Trace(
+		reader.logger.Debug(
 			store, "message", firstFewBytes(data), "timeout", time.Unix(int64(timeout), 0),
 			"this", reader, more,
 		)

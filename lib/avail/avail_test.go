@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/0xPolygon/cdk/log"
 	avail_sdk "github.com/availproject/avail-go-sdk/sdk"
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -38,6 +39,7 @@ func createAvailBackend(t *testing.T) AvailBackend {
 	t.Log("AvailDAInfo: Avail backend client created successfully")
 
 	return AvailBackend{
+		log.GetDefaultLogger(),
 		sdk, acc, acc.SS58Address(AvailNetworkID),
 		appId, config.HttpApiUrl, false,
 		config.BridgeApiUrl, nil, config.BridgeTimeout, nil,
