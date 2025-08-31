@@ -99,7 +99,7 @@ func buildS3Client(accessKey, secretKey, region string) (*s3.Client, error) {
 }
 
 func (s3s *S3StorageService) GetByHash(ctx context.Context, key common.Hash) ([]byte, error) {
-	s3s.logger.Debug("avail.S3StorageService.GetByHash", "key", prettyHash(key), "this", s3s)
+	s3s.logger.Debugf("avail.S3StorageService.GetByHash key=%s this=%v", prettyHash(key), s3s)
 
 	buf := manager.NewWriteAtBuffer([]byte{})
 	_, err := s3s.downloader.Download(ctx, buf, &s3.GetObjectInput{
@@ -176,7 +176,7 @@ func (s3s *S3StorageService) Put(ctx context.Context, value []byte, timeout uint
 	}
 	_, err := s3s.uploader.Upload(ctx, &putObjectInput)
 	if err != nil {
-		s3s.logger.Error("avail.S3StorageService.Store", "err", err)
+		s3s.logger.Errorf("avail.S3StorageService.Store error=%v", err)
 	}
 	return err
 }
@@ -248,15 +248,15 @@ func EncodeStorageServiceKey(key common.Hash) string {
 func logPut(store string, data []byte, timeout uint64, reader *S3StorageService, more ...interface{}) {
 	if len(more) == 0 {
 		// #nosec G115
-		reader.logger.Debug(
-			store, "message", firstFewBytes(data), "timeout", time.Unix(int64(timeout), 0),
-			"this", reader,
+		reader.logger.Debugf(
+			"%s message=%s timeout=%s this=%v",
+			store, firstFewBytes(data), time.Unix(int64(timeout), 0), reader,
 		)
 	} else {
 		// #nosec G115
-		reader.logger.Debug(
-			store, "message", firstFewBytes(data), "timeout", time.Unix(int64(timeout), 0),
-			"this", reader, more,
+		reader.logger.Debugf(
+			"%s message=%s timeout=%s this=%v %v",
+			store, firstFewBytes(data), time.Unix(int64(timeout), 0), reader, more,
 		)
 	}
 }

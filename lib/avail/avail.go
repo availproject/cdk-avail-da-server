@@ -67,19 +67,19 @@ func New(l1RPCURL string, attestationContractAddress common.Address, config Conf
 	}
 
 	logger.Info("AvailDAInfo: ✏️ Avail backend client is being initialized...")
-	logger.Debug("AvailDADebug: AvailDA config",
-		"ws-api-url", config.WsApiUrl,
-		"http-api-url", config.HttpApiUrl,
-		"app-id", config.AppID,
-		"bridge-enabled", config.BridgeEnabled,
-		"bridge-api-url", config.BridgeApiUrl,
-		"bridge-timeout", config.BridgeTimeout,
+	logger.Debugf("AvailDADebug: AvailDA config, ws-api-url: %s, http-api-url: %s, app-id: %d, bridge-enabled: %t, bridge-api-url: %s, bridge-timeout: %d",
+		config.WsApiUrl,
+		config.HttpApiUrl,
+		config.AppID,
+		config.BridgeEnabled,
+		config.BridgeApiUrl,
+		config.BridgeTimeout,
 	)
-	logger.Debug("AvailDADebug: 📜 Attestation contract", "address", attestationContractAddress)
+	logger.Debugf("AvailDADebug: 📜 Attestation contract address=%s", attestationContractAddress)
 
 	ethClient, err := ethclient.Dial(l1RPCURL)
 	if err != nil {
-		logger.Error("AvailDAError: ⚠️ error connecting to %s: %+v", l1RPCURL, err)
+		logger.Errorf("AvailDAError: ⚠️ error connecting to %s: %+v", l1RPCURL, err)
 		return nil, err
 	}
 
@@ -90,7 +90,7 @@ func New(l1RPCURL string, attestationContractAddress common.Address, config Conf
 
 	sdk, err := avail_sdk.NewSDK(config.HttpApiUrl)
 	if err != nil {
-		logger.Error("AvailDAError: ⚠️ error connecting to %s: %+v", config.HttpApiUrl, err)
+		logger.Errorf("AvailDAError: ⚠️ error connecting to %s: %+v", config.HttpApiUrl, err)
 		return nil, err
 	}
 
@@ -108,14 +108,14 @@ func New(l1RPCURL string, attestationContractAddress common.Address, config Conf
 
 	var fallbackS3Service *s3_storage_service.S3StorageService
 	if config.FallbackS3ServiceConfig.Enable {
-		logger.Debug("AvailDADebug:ℹ️ Fallback S3 config: s3-bucket: %+v, region: %+v, object-prefix: %+v, secret-key: %+v, access-key: %+v, ", config.FallbackS3ServiceConfig.Bucket, config.FallbackS3ServiceConfig.Region, config.FallbackS3ServiceConfig.ObjectPrefix, config.FallbackS3ServiceConfig.SecretKey, config.FallbackS3ServiceConfig.AccessKey)
+		logger.Debugf("AvailDADebug:ℹ️ Fallback S3 config: s3-bucket: %s, region: %s, object-prefix: %s, secret-key: %s, access-key: %s", config.FallbackS3ServiceConfig.Bucket, config.FallbackS3ServiceConfig.Region, config.FallbackS3ServiceConfig.ObjectPrefix, config.FallbackS3ServiceConfig.SecretKey, config.FallbackS3ServiceConfig.AccessKey)
 		fallbackS3Service, err = s3_storage_service.NewS3StorageService(config.FallbackS3ServiceConfig, logger)
 		if err != nil {
 			return nil, fmt.Errorf("AvailDAError: unable to intialize s3 storage service for fallback, %w. %w", err, ErrAvailDAClientInit)
 		}
 	}
 
-	logger.Debug("AvailDADebug: 🔑 Using KeyringPair", "address", acc.SS58Address(AvailNetworkID))
+	logger.Debugf("AvailDADebug: 🔑 Using KeyringPair address=%s", acc.SS58Address(AvailNetworkID))
 	logger.Info("AvailDAInfo:✌️ Avail backend client is created successfully")
 
 	return &AvailBackend{
@@ -145,7 +145,8 @@ func (a *AvailBackend) PostSequence(ctx context.Context, batchesData [][]byte) (
 	if err != nil {
 		return nil, fmt.Errorf("cannot RLP encode data:%w", err)
 	}
-	a.logger.Info("AvailDAInfo: ⚡️ Posting Sequence ", "length=", len(sequenceBlobData))
+
+	a.logger.Infof("AvailDAInfo: ⚡️ Posting Sequence length=%d", len(sequenceBlobData))
 
 	// Submit the data to the Avail chain
 	a.logger.Info("AvailDAInfo: 📤 Submitting data to Avail chain")
@@ -192,20 +193,20 @@ func (a *AvailBackend) PostSequence(ctx context.Context, batchesData [][]byte) (
 		// Log error but don't fail the whole operation
 		// as data is already submitted to Avail chain
 		if err = a.fallbackS3Service.PutMultiple(ctx, batchesData); err != nil {
-			a.logger.Error("AvailDAError: failed to put data on s3 storage service: %w", err)
+			a.logger.Errorf("AvailDAError: failed to put data on s3 storage service: %v", err)
 		} else {
 			a.logger.Info("AvailDAInfo: ✅  Succesfully posted data to S3 using fallbackS3Service")
 		}
 	}
 
-	a.logger.Debug("AvailDADebug: ✅ Data availability message: %+v", dataAvailabilityMessage)
-	a.logger.Info("AvailDAInfo: ⚡️ Sequence posted successfully ", "length=", len(sequenceBlobData))
+	a.logger.Debugf("AvailDADebug: ✅ Data availability message (hex): %s", common.Bytes2Hex(dataAvailabilityMessage))
+	a.logger.Infof("AvailDAInfo: ⚡️ Sequence posted successfully length=%d", len(sequenceBlobData))
 	return dataAvailabilityMessage, nil
 }
 
 func (a *AvailBackend) GetSequence(ctx context.Context, batchHashes []common.Hash, dataAvailabilityMessage []byte) ([][]byte, error) {
 
-	a.logger.Info("AvailDAInfo: 📤 Getting Sequence", "num_batches", len(batchHashes))
+	a.logger.Infof("AvailDAInfo: 📤 Getting Sequence num_batches=%d", len(batchHashes))
 
 	msgType, payload, err := UnpackEnvelopeForMsgType(dataAvailabilityMessage)
 	if err != nil {
@@ -250,7 +251,7 @@ func (a *AvailBackend) GetSequence(ctx context.Context, batchHashes []common.Has
 		var err error
 		batchesData, err := a.fallbackS3Service.GetMultipleByHash(ctx, batchHashes)
 		if err != nil {
-			a.logger.Warn("AvailDAWarn: ❌  failed to read data from fallback s3 storage, err: %w", err)
+			a.logger.Warnf("AvailDAWarn: ❌  failed to read data from fallback s3 storage, err: %v", err)
 		} else {
 			a.logger.Info("AvailDAInfo: ✅  Succesfully fetched data from Avail S3 using fallbackS3Service")
 			return batchesData, nil
@@ -288,7 +289,7 @@ func (a *AvailBackend) GetSequence(ctx context.Context, batchHashes []common.Has
 		return nil, fmt.Errorf("cannot RLP decode data:%w", err)
 	}
 
-	a.logger.Info("AvailDAInfo: 📥 Sequence retrieved successfully", "num_batches", len(batchesData))
+	a.logger.Infof("AvailDAInfo: 📥 Sequence retrieved successfully num_batches=%d", len(batchesData))
 	return batchesData, nil
 }
 
@@ -337,12 +338,12 @@ func (a *AvailBackend) submitData(ctx context.Context, sequence []byte) (avail_s
 			return avail_sdk.TransactionDetails{}, fmt.Errorf("⚠️ extrinsic got rejected: %w", res.err)
 		}
 
-		a.logger.Debug("AvailDADebug: ✅ Data is included in Avail chain",
-			"address", a.address,
-			"appID", a.appId,
-			"block_number", res.details.BlockNumber,
-			"block_hash", res.details.BlockHash,
-			"tx_index", res.details.TxIndex,
+		a.logger.Debugf("AvailDADebug: ✅ Data is included in Avail chain address=%s appID=%d block_number=%d block_hash=%s tx_index=%d",
+			a.address,
+			a.appId,
+			res.details.BlockNumber,
+			res.details.BlockHash,
+			res.details.TxIndex,
 		)
 		return res.details, nil
 	}
@@ -350,13 +351,13 @@ func (a *AvailBackend) submitData(ctx context.Context, sequence []byte) (avail_s
 
 func (a *AvailBackend) getMerkleProofFromAvailBridge(ctx context.Context, blockHash primitives.H256, txIndex uint32) (*MerkleProofInput, error) {
 
-	a.logger.Info("AvailDAInfo: ℹ️ Querying merkle proof of data submitted from Avail Bridge for attesting on settlement layer", "blockHash", blockHash, "txIndex", txIndex)
+	a.logger.Infof("AvailDAInfo: ℹ️ Querying merkle proof of data submitted from Avail Bridge for attesting on settlement layer blockHash=%s txIndex=%d", blockHash, txIndex)
 	var input *BridgeAPIResponse
 	waitTime := time.Duration(a.bridgeTimeout) * time.Second
 	retryCount := BridgeApiRetryCount
 	for retryCount > 0 {
 		url := fmt.Sprintf("%s/eth/proof/%s?index=%d", a.bridgeApi, blockHash.String(), txIndex)
-		a.logger.Debug("AvailDAInfo: ℹ️ Querying Bridge for merkle proof", "URL", url)
+		a.logger.Debugf("AvailDAInfo: ℹ️ Querying Bridge for merkle proof URL=%s", url)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return nil, fmt.Errorf("new request: %w", err)
@@ -381,7 +382,7 @@ func (a *AvailBackend) getMerkleProofFromAvailBridge(ctx context.Context, blockH
 		if resp != nil {
 			resp.Body.Close()
 		}
-		a.logger.Debug("AvailDAWarn: ⏳ Attestation proof RPC errored, response code: %v, retry count left: %v, retrying in %v", resp.StatusCode, (retryCount - 1), waitTime)
+		a.logger.Debugf("AvailDAWarn: ⏳ Attestation proof RPC errored, response code: %v, retry count left: %v, retrying in %v", resp.StatusCode, (retryCount - 1), waitTime)
 
 		timer := time.NewTimer(waitTime)
 		defer timer.Stop()
@@ -398,7 +399,7 @@ func (a *AvailBackend) getMerkleProofFromAvailBridge(ctx context.Context, blockH
 		return nil, fmt.Errorf("didn't get any proof from bridge api")
 	}
 
-	a.logger.Debug("AvailDAInfo: 🔗 Attestation proof: %+v", input)
+	a.logger.Debugf("AvailDAInfo: 🔗 Attestation proof: %+v", input)
 
 	merkleProofInput := NewMerkleProofInput(input)
 
@@ -449,10 +450,10 @@ func (a *AvailBackend) getData(blockNumber uint32, index uint32, indexType Index
 		a.logger.Warn("AvailDAWarn:‼️ Unable to extract the signer address for the blob")
 	}
 
-	a.logger.Debug("AvailDADebug: ✅ Data retrieved from Avail chain",
-		" signer: ", signerAddress.ToHuman(),
-		", appID: ", blob.AppId,
-		", extrinsicHash: ", blob.TxHash,
+	a.logger.Debugf("AvailDADebug: ✅ Data retrieved from Avail chain signer: %s, appID: %d, extrinsicHash: %s",
+		signerAddress.ToHuman(),
+		blob.AppId,
+		blob.TxHash,
 	)
 
 	return blob.Data, nil
