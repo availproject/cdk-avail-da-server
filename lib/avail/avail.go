@@ -62,6 +62,10 @@ type AvailBackend struct {
 
 func New(l1RPCURL string, attestationContractAddress common.Address, config Config, logger *log.Logger) (*AvailBackend, error) {
 
+	if logger == nil {
+		logger = log.GetDefaultLogger()
+	}
+
 	logger.Info("AvailDAInfo: ✏️ Avail backend client is being initialized...")
 	logger.Debug("AvailDADebug: AvailDA config",
 		"ws-api-url", config.WsApiUrl,
