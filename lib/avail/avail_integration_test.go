@@ -1,6 +1,3 @@
-//go:build integration
-// +build integration
-
 package avail
 
 import (
@@ -9,7 +6,9 @@ import (
 
 	"github.com/0xPolygon/cdk/log"
 	avail_sdk "github.com/availproject/avail-go-sdk/sdk"
+	s3_storage_service "github.com/availproject/cdk-avail-da-server/lib/avail/s3StorageService"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,6 +44,58 @@ func createAvailBackend(t *testing.T) AvailBackend {
 		sdk, acc, acc.SS58Address(AvailNetworkID),
 		appId, config.HttpApiUrl, false,
 		config.BridgeApiUrl, nil, config.BridgeTimeout, nil,
+	}
+}
+
+func TestS3PutAndGetMultiple(t *testing.T) {
+	ctx := context.Background()
+	if deadline, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, deadline)
+		defer cancel()
+	}
+
+	var config Config
+	err := config.GetConfig("./avail-config.json")
+	if err != nil {
+		t.Fatalf("cannot get config: %+v", err)
+	}
+
+	if !config.FallbackS3ServiceConfig.Enable ||
+		config.FallbackS3ServiceConfig.Bucket == "" ||
+		config.FallbackS3ServiceConfig.Region == "" ||
+		config.FallbackS3ServiceConfig.AccessKey == "" ||
+		config.FallbackS3ServiceConfig.SecretKey == "" {
+		t.Skip("Skipping test because S3 fallback service is not properly configured or disabled")
+	}
+
+	logger := log.GetDefaultLogger()
+	s3Service, err := s3_storage_service.NewS3StorageService(config.FallbackS3ServiceConfig, logger)
+	require.NoError(t, err)
+
+	values := [][]byte{
+		[]byte("foo-data"),
+		[]byte("bar-data"),
+	}
+
+	err = s3Service.PutMultiple(ctx, values)
+	require.NoError(t, err)
+
+	commitments := make([]common.Hash, len(values))
+	for i, val := range values {
+		commitments[i] = crypto.Keccak256Hash(val)
+	}
+
+	for i, commitment := range commitments {
+		t.Logf("Value %d commitment: %s", i, commitment.Hex())
+	}
+
+	retrieved, err := s3Service.GetMultipleByHash(ctx, commitments)
+	require.NoError(t, err)
+	require.Equal(t, values, retrieved)
+
+	for i, val := range retrieved {
+		t.Logf("Retrieved value %d: %s", i, string(val))
 	}
 }
 

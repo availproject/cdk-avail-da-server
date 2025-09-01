@@ -38,6 +38,10 @@ func NewS3Backend(bucket, region, accessKey, secretKey, objectPrefix string) (*S
 	}, nil
 }
 
+func encodeKey(hash common.Hash) string {
+	return hash.Hex()[2:] // strip 0x
+}
+
 func (s *S3Backend) GetDataFromS3(hash common.Hash) ([]byte, error) {
 	start := time.Now()
 	log.Printf("Fetching data from S3, hash:%v", hash.Hex())
@@ -55,10 +59,10 @@ func (s *S3Backend) GetDataFromS3(hash common.Hash) ([]byte, error) {
 
 	out, err := s.s3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
-		Key:    aws.String(s.objectPrefix + hash.String()),
+		Key:    aws.String(s.objectPrefix + encodeKey(hash)),
 	})
 	if err != nil {
-		log.Printf("Failed to get object from S3, key:%v, err:%v", s.objectPrefix+hash.String(), err)
+		log.Printf("Failed to get object from S3, key:%v, err:%v", s.objectPrefix+encodeKey(hash), err)
 		return nil, fmt.Errorf("failed to get object: %w", err)
 	}
 	defer out.Body.Close()
