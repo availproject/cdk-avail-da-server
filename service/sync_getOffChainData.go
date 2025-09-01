@@ -6,9 +6,10 @@ import (
 
 	"github.com/availproject/cdk-avail-da-server/da"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
-func GetOffChainData(a *da.AvailBackend, s *da.S3Backend, hash string) ([]byte, error) {
+func GetOffChainData(a *da.AvailBackend, s *da.S3Backend, hash string) (string, error) {
 	log.Printf("Getting off-chain data for hash: %s", hash)
 
 	hexHash := common.HexToHash(hash)
@@ -30,9 +31,9 @@ func GetOffChainData(a *da.AvailBackend, s *da.S3Backend, hash string) ([]byte, 
 	data, err := s.GetDataFromS3(hexHash)
 	if err != nil {
 		log.Printf("Failed to retrieve off-chain data from S3: %v", err)
-		return nil, errors.New("failed to retrieve the data from off-chain DA")
+		return "", errors.New("failed to retrieve the data from off-chain DA")
 	}
 
 	log.Println("Successfully retrieved off-chain data")
-	return data, nil
+	return hexutil.Encode(data), nil
 }
