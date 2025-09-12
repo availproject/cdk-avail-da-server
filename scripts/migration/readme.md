@@ -35,31 +35,33 @@ Create a `.env` file inside `scripts/migration/`:
 ```
 
 ```env
-# Block range
-START_BLOCK=9165751
-END_BLOCK=9165800
+#L1 RPC
+RPC_URL=https://sepolia.infura.io/v3/<API_KEY>
 
-# L1
-L1_RPC_URL=https://sepolia.infura.io/v3/<PROJECT_ID>
-L1_CONTRACT_ADDRESS=0xYourContractAddressHere
-
-# DAC
-DAC_RPC_URL=https://dac.test.availproject.org
+# DAC RPC
+DAC_URL=https://test.cdk.dac/rpc/
 
 # Turbo DA
-TURBO_DA_URL=https://staging.turbo-api.availproject.org/v1/submit_raw_data
-TURBO_DA_API_KEY=your-api-key-here
+TURBO_DA_URL=https://turing.turbo-api.availproject.org
+API_KEY=
 
-# S3
-S3_BUCKET=polygon-cdk-test
-S3_REGION=us-east-1
-S3_ACCESS_KEY=your-access-key
-S3_SECRET_KEY=your-secret-key
-S3_OBJECT_PREFIX=
+# Rollup contract address
+CONTRACT_ADDRESS=0x123456789abcdef...
 
-# Retry tuning
+# Migration l1 block range
+START_BLOCK=5000000
+END_BLOCK=5000100
+
+# Script retry attempts count
 MAX_ATTEMPTS=5
+MAX_TIMEOUT_MINS=10
 
+# S3 configuration
+S3_BUCKET=
+S3_REGION=
+S3_ACCESS_KEY=
+S3_SECRET_KEY=
+S3_OBJECT_PREFIX=
 ```
 
 ## Running
