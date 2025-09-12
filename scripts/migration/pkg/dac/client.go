@@ -3,10 +3,12 @@ package dac
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -75,6 +77,11 @@ func GetDataFromDACByHash(ctx context.Context, dacURL string, hash common.Hash) 
 		return nil, fmt.Errorf("rpc error code=%d msg=%s", rpcResp.Error.Code, rpcResp.Error.Message)
 	}
 
-	// fmt.Printf("OffChainData (base64): %s\n", string(rpcResp.Result))
-	return rpcResp.Result, nil
+	resData := strings.Trim(string(rpcResp.Result), "\"")
+	decoded, err := hex.DecodeString(resData[2:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode result: %w", err)
+	}
+
+	return decoded, nil
 }

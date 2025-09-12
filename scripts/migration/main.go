@@ -13,6 +13,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/joho/godotenv"
 
@@ -75,6 +76,11 @@ func main() {
 			})
 			if err != nil {
 				log.Printf("    ⛔ Skipping batch (could not fetch from DAC)")
+				continue
+			}
+
+			if hash := crypto.Keccak256Hash(batchData); hash != h {
+				log.Println("    ⛔ Batch hash mismatch!")
 				continue
 			}
 			// Upload to S3 with retries
